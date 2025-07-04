@@ -1,0 +1,199 @@
+{
+  "name": "complete-student-onboarding",
+  "description": "Comprehensive student onboarding across multiple educational systems",
+  "version": "1.0.0",
+  "composedTools": [
+    {
+      "id": "create-user-account",
+      "server": "oneroster-server",
+      "tool": "create-user",
+      "description": "Create student user account in OneRoster",
+      "parameterMapping": {
+        "name": "student.name",
+        "email": "student.email",
+        "role": "student",
+        "grade": "student.grade",
+        "status": "active"
+      },
+      "required": true,
+      "timeout": 10000
+    },
+    {
+      "id": "enroll-in-classes",
+      "server": "oneroster-server", 
+      "tool": "bulk-enroll-student",
+      "description": "Enroll student in specified classes",
+      "parameterMapping": {
+        "userId": "${create-user-account.result.userId}",
+        "classIds": "classes",
+        "enrollmentType": "student",
+        "startDate": "currentDate"
+      },
+      "dependsOn": ["create-user-account"],
+      "required": true,
+      "timeout": 15000
+    },
+    {
+      "id": "create-assessment-profile",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Create initial QTI assessment profile",
+      "parameterMapping": {
+        "sourceApi": "oneroster",
+        "targetApi": "qti", 
+        "useCase": "student-assessment-profile",
+        "studentData": "${create-user-account.result}",
+        "profileType": "assessmentProfile",
+        "adaptiveSettings": {
+          "enabled": true,
+          "initialDifficulty": "medium"
+        }
+      },
+      "dependsOn": ["create-user-account"],
+      "required": false,
+      "timeout": 12000
+    },
+    {
+      "id": "setup-analytics-tracking",
+      "server": "analytics-server",
+      "tool": "initialize-student-tracking",
+      "description": "Setup Caliper analytics tracking",
+      "parameterMapping": {
+        "studentId": "${create-user-account.result.userId}",
+        "trackingLevel": "trackingLevel",
+        "enrollments": "${enroll-in-classes.result.enrollments}",
+        "assessmentProfile": "${create-assessment-profile.result}",
+        "realTimeUpdates": true
+      },
+      "dependsOn": ["enroll-in-classes", "create-assessment-profile"],
+      "required": false,
+      "timeout": 10000
+    },
+    {
+      "id": "initialize-mastery-path",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Initialize PowerPath mastery learning",
+      "parameterMapping": {
+        "sourceApi": "oneroster",
+        "targetApi": "powerpath",
+        "useCase": "mastery-path-initialization",
+        "studentData": "${create-user-account.result}",
+        "classData": "${enroll-in-classes.result}",
+        "initialObjectives": "auto-generate",
+        "adaptivePath": true
+      },
+      "dependsOn": ["enroll-in-classes"],
+      "required": false,
+      "timeout": 15000
+    },
+    {
+      "id": "validate-onboarding",
+      "server": "timeback",
+      "tool": "validate-api-integration",
+      "description": "Validate complete onboarding process",
+      "parameterMapping": {
+        "integrationPoints": [
+          "${create-user-account.result}",
+          "${enroll-in-classes.result}",
+          "${create-assessment-profile.result}",
+          "${setup-analytics-tracking.result}",
+          "${initialize-mastery-path.result}"
+        ],
+        "validationLevel": "comprehensive"
+      },
+      "dependsOn": [
+        "create-user-account",
+        "enroll-in-classes", 
+        "create-assessment-profile",
+        "setup-analytics-tracking",
+        "initialize-mastery-path"
+      ],
+      "required": true,
+      "timeout": 8000
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "student": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "Full name of the student" },
+          "email": { "type": "string", "format": "email", "description": "Student email address" },
+          "grade": { "type": "integer", "minimum": 1, "maximum": 12, "description": "Grade level" },
+          "dateOfBirth": { "type": "string", "format": "date", "description": "Date of birth (optional)" }
+        },
+        "required": ["name", "email", "grade"]
+      },
+      "classes": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Array of class IDs to enroll the student in"
+      },
+      "assessmentProfile": {
+        "type": "string",
+        "enum": ["basic", "adaptive-learning", "advanced"],
+        "default": "adaptive-learning",
+        "description": "Type of assessment profile to create"
+      },
+      "trackingLevel": {
+        "type": "string", 
+        "enum": ["minimal", "standard", "detailed"],
+        "default": "standard",
+        "description": "Level of analytics tracking to enable"
+      }
+    },
+    "required": ["student", "classes"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "studentId": { "type": "string" },
+      "enrollments": { "type": "array" },
+      "assessmentProfileId": { "type": "string" },
+      "trackingProfileId": { "type": "string" },
+      "masteryPathId": { "type": "string" },
+      "validationResults": { "type": "object" },
+      "executionSummary": {
+        "type": "object",
+        "properties": {
+          "totalSteps": { "type": "integer" },
+          "successfulSteps": { "type": "integer" },
+          "failedSteps": { "type": "integer" },
+          "executionTime": { "type": "string" }
+        }
+      }
+    }
+  },
+  "errorHandling": {
+    "strategy": "rollback-on-required-failure",
+    "rollbackOrder": [
+      "initialize-mastery-path",
+      "setup-analytics-tracking", 
+      "create-assessment-profile",
+      "enroll-in-classes",
+      "create-user-account"
+    ],
+    "maxRetries": 2,
+    "retryDelay": 1000
+  },
+  "performance": {
+    "parallelExecution": {
+      "enabled": true,
+      "groups": [
+        ["create-assessment-profile", "setup-analytics-tracking", "initialize-mastery-path"]
+      ]
+    },
+    "caching": {
+      "enabled": true,
+      "ttl": 300000
+    }
+  },
+  "metadata": {
+    "author": "TimeBack MCP Server",
+    "tags": ["onboarding", "student-management", "integration"],
+    "estimatedDuration": "30-45 seconds"
+  }
+}

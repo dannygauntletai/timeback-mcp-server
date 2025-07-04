@@ -339,6 +339,267 @@ CRAWLER_INDEX_METADATA=true
 - **Pattern Recognition** - Identify common integration patterns and best practices
 - **Metadata Enrichment** - Add tags, categories, and difficulty levels
 
+## MCP Server Integration Patterns
+
+The TimeBack MCP Server supports advanced integration patterns that allow it to work seamlessly with other MCP servers, creating powerful multi-server workflows and data sharing capabilities.
+
+### 🔗 Integration Architecture
+
+The TimeBack MCP Server acts as both a standalone MCP server and an integration hub that can:
+- **Chain multiple MCP servers** for complex workflows
+- **Compose tools** from different servers into unified operations  
+- **Share resources** across server boundaries
+- **Emit real-time events** for integration status changes
+- **Provide SSE endpoints** for MCP Hive-style integrations
+
+### 🛠️ Integration Patterns
+
+#### 1. MCP Server Chaining Pattern
+Chain multiple MCP servers to create complex, multi-step workflows that span different domains.
+
+**Use Case**: Educational workflow that combines student data (OneRoster), assessment creation (QTI), and analytics tracking (Caliper)
+
+**Configuration**:
+```env
+INTEGRATION_ENABLED=true
+INTEGRATION_SERVER_CHAINING=true
+```
+
+**Example Workflow**:
+```json
+{
+  "name": "student-assessment-workflow",
+  "workflow": [
+    {
+      "id": "fetch-students",
+      "server": "oneroster-server",
+      "tool": "get-students",
+      "params": { "classId": "class-123" }
+    },
+    {
+      "id": "create-assessment",
+      "server": "timeback",
+      "tool": "generate-qti-assessment",
+      "params": { "subject": "math", "difficulty": "intermediate" },
+      "dependsOn": ["fetch-students"]
+    },
+    {
+      "id": "track-analytics",
+      "server": "analytics-server", 
+      "tool": "setup-tracking",
+      "params": { "assessmentId": "${create-assessment.result.id}" },
+      "dependsOn": ["create-assessment"]
+    }
+  ]
+}
+```
+
+#### 2. Tool Composition Pattern
+Combine tools from multiple MCP servers into unified operations that appear as single tools to clients.
+
+**Use Case**: Create a "complete-student-onboarding" tool that combines user creation, enrollment, and initial assessment setup
+
+**Configuration**:
+```env
+INTEGRATION_ENABLED=true
+INTEGRATION_TOOL_COMPOSITION=true
+```
+
+**Usage**:
+```bash
+# Use the compose-integration-workflow tool
+# This creates a unified workflow from multiple server tools
+```
+
+#### 3. Shared Resource Pattern
+Share resources like documentation, schemas, and integration patterns across multiple MCP servers.
+
+**Use Case**: Multiple educational MCP servers can access TimeBack's comprehensive API documentation and integration templates
+
+**Configuration**:
+```env
+INTEGRATION_ENABLED=true
+INTEGRATION_SHARED_RESOURCES=true
+```
+
+**Available Shared Resources**:
+- `timeback://integration/patterns` - Integration patterns and best practices
+- `timeback://integration/servers` - Connected server information and capabilities
+- `timeback://documentation/indexed` - All indexed TimeBack API documentation
+
+#### 4. Event-Driven Integration Pattern
+Real-time event notifications for integration status changes, server connections, and workflow completions.
+
+**Use Case**: Notify dependent systems when TimeBack integration status changes or when workflows complete
+
+**Configuration**:
+```env
+INTEGRATION_ENABLED=true
+INTEGRATION_EVENT_DRIVEN=true
+```
+
+**Event Types**:
+- `server_connected` - New MCP server connected
+- `server_disconnected` - MCP server disconnected
+- `workflow_completed` - Integration workflow finished
+- `workflow_failed` - Integration workflow encountered error
+
+#### 5. SSE-Based Integration Pattern (MCP Hive Compatible)
+Server-Sent Events endpoints for real-time integration with MCP Hive and other SSE-compatible systems.
+
+**Use Case**: Real-time dashboard showing TimeBack integration status and live workflow execution
+
+**Configuration**:
+```env
+INTEGRATION_ENABLED=true
+INTEGRATION_SSE=true
+INTEGRATION_SSE_ENABLED=true
+INTEGRATION_SSE_PORT=3001
+INTEGRATION_SSE_CORS_ORIGINS=*
+```
+
+**SSE Endpoints**:
+- `GET /events` - Main SSE event stream
+- `GET /events/health` - Health check endpoint
+- `GET /events/stats` - Integration statistics
+- `POST /events/broadcast` - Broadcast custom events
+
+### 🔧 Integration Tools
+
+The TimeBack MCP Server provides specialized tools for managing integrations:
+
+#### `connect-mcp-server`
+Connect to downstream MCP servers for integration workflows.
+
+```json
+{
+  "name": "connect-mcp-server",
+  "arguments": {
+    "name": "analytics-server",
+    "transport": "sse",
+    "url": "http://localhost:3002"
+  }
+}
+```
+
+#### `get-integration-status`
+Get current status of all integrations and connected servers.
+
+```json
+{
+  "name": "get-integration-status",
+  "arguments": {}
+}
+```
+
+#### `get-integration-health`
+Perform health checks on integration manager and connected servers.
+
+```json
+{
+  "name": "get-integration-health", 
+  "arguments": {}
+}
+```
+
+#### `compose-integration-workflow`
+Create and execute multi-server workflows.
+
+```json
+{
+  "name": "compose-integration-workflow",
+  "arguments": {
+    "name": "student-data-sync",
+    "workflow": [...]
+  }
+}
+```
+
+### 🔐 Authentication Strategy
+
+The TimeBack MCP Server uses a layered authentication approach for multi-server integrations:
+
+#### Primary Authentication
+- **OAuth2 Client Credentials** flow for TimeBack APIs
+- Automatic token refresh and caching
+- Secure credential storage via environment variables
+
+#### Proxy Authentication
+- **Credential forwarding** to downstream MCP servers when needed
+- **Token sharing** for servers that support TimeBack authentication
+- **Isolated authentication** for servers with independent auth systems
+
+#### Configuration
+```env
+# Primary TimeBack Authentication
+OAUTH2_TOKEN_URL=https://alpha-auth-production-idp.auth.us-west-2.amazoncognito.com/oauth2/token
+CLIENT_ID=your_client_id
+CLIENT_SECRET=your_client_secret
+
+# Integration Authentication (optional)
+INTEGRATION_AUTH_FORWARD=true
+INTEGRATION_AUTH_TIMEOUT=30000
+```
+
+### 🚀 Getting Started with Integrations
+
+#### 1. Enable Integration Features
+```env
+# Basic integration setup
+INTEGRATION_ENABLED=true
+INTEGRATION_SERVER_CHAINING=true
+INTEGRATION_TOOL_COMPOSITION=true
+INTEGRATION_SHARED_RESOURCES=true
+```
+
+#### 2. Connect to Other MCP Servers
+```bash
+# Use the connect-mcp-server tool to establish connections
+# Supports HTTP, WebSocket, and SSE transports
+```
+
+#### 3. Create Integration Workflows
+```bash
+# Use compose-integration-workflow to create multi-server workflows
+# Define dependencies and data flow between servers
+```
+
+#### 4. Monitor Integration Health
+```bash
+# Use get-integration-status and get-integration-health
+# Monitor connected servers and workflow execution
+```
+
+### 🌐 MCP Hive Compatibility
+
+The TimeBack MCP Server is fully compatible with MCP Hive integration patterns:
+
+- **SSE Transport**: Uses standard Server-Sent Events for real-time communication
+- **Event Schema**: Compatible with MCP Hive event formats
+- **Health Endpoints**: Standard health check and statistics endpoints
+- **CORS Support**: Configurable CORS for web-based integrations
+
+### 📋 Integration Configuration Reference
+
+```env
+# Core Integration Settings
+INTEGRATION_ENABLED=true                    # Enable integration features
+INTEGRATION_SERVER_CHAINING=true           # Enable server chaining pattern
+INTEGRATION_TOOL_COMPOSITION=true          # Enable tool composition pattern  
+INTEGRATION_SHARED_RESOURCES=true          # Enable shared resource pattern
+INTEGRATION_EVENT_DRIVEN=true              # Enable event-driven pattern
+INTEGRATION_SSE=true                       # Enable SSE-based pattern
+
+# SSE Configuration
+INTEGRATION_SSE_ENABLED=true               # Enable SSE endpoints
+INTEGRATION_SSE_PORT=3001                  # SSE server port
+INTEGRATION_SSE_CORS_ORIGINS=*             # CORS origins (comma-separated)
+
+# Authentication
+INTEGRATION_AUTH_FORWARD=true              # Forward auth to downstream servers
+INTEGRATION_AUTH_TIMEOUT=30000             # Auth timeout in milliseconds
+```
+
 ## API Integration Examples
 
 ### Student Data Synchronization

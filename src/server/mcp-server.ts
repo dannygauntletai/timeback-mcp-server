@@ -14,6 +14,9 @@ import { AuthService } from '../services/auth.js';
 import { CodebaseAnalyzer, CodebaseAnalysis } from '../services/codebase-analyzer.js';
 import { DocumentationCrawler } from '../services/documentation-crawler.js';
 import { DocumentationIndexer } from '../services/documentation-indexer.js';
+import { ToolComposer } from '../services/tool-composer.js';
+import { McpProxy } from '../services/mcp-proxy.js';
+import { IntegrationManager } from '../services/integration-manager.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import path from 'path';
@@ -128,6 +131,9 @@ export class TimeBackMcpServer {
   private codebaseAnalyzer: CodebaseAnalyzer;
   private documentationCrawler: DocumentationCrawler;
   private documentationIndexer: DocumentationIndexer;
+  private mcpProxy: McpProxy;
+  private toolComposer: ToolComposer;
+  private integrationManager: IntegrationManager;
 
   constructor() {
     this.validateConfiguration();
@@ -150,6 +156,13 @@ export class TimeBackMcpServer {
     this.codebaseAnalyzer = new CodebaseAnalyzer();
     this.documentationCrawler = new DocumentationCrawler();
     this.documentationIndexer = new DocumentationIndexer();
+    this.mcpProxy = new McpProxy();
+    this.toolComposer = new ToolComposer(this.mcpProxy);
+    this.integrationManager = new IntegrationManager();
+    
+    this.integrationManager.initialize().catch(error => {
+      logger.error('Failed to initialize integration manager:', error);
+    });
     
     this.setupHandlers();
     
@@ -545,6 +558,39 @@ export class TimeBackMcpServer {
               },
             },
           },
+          {
+            name: 'compose-integration-workflow',
+            description: 'Compose a workflow using TimeBack APIs and external MCP servers',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: {
+                  type: 'string',
+                  description: 'Name for the workflow',
+                },
+                description: {
+                  type: 'string',
+                  description: 'Description of what the workflow accomplishes',
+                },
+                workflow: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      id: { type: 'string', description: 'Unique identifier for this step' },
+                      server: { type: 'string', description: 'Target server (timeback or external server name)' },
+                      tool: { type: 'string', description: 'Tool name to call' },
+                      params: { type: 'object', description: 'Parameters for the tool' },
+                      dependsOn: { type: 'array', items: { type: 'string' }, description: 'Previous step IDs this depends on' }
+                    },
+                    required: ['id', 'server', 'tool', 'params']
+                  },
+                  description: 'Array of workflow steps to execute in order'
+                }
+              },
+              required: ['name', 'workflow']
+            },
+          },
         ],
       };
     });
@@ -599,6 +645,18 @@ export class TimeBackMcpServer {
           case 'get-integration-patterns':
             return await this.getIntegrationPatterns(args);
 
+          case 'compose-integration-workflow':
+            return await this.composeIntegrationWorkflow(args);
+
+          case 'connect-mcp-server':
+            return await this.connectMcpServer(args);
+
+          case 'get-integration-status':
+            return await this.getIntegrationStatus();
+
+          case 'get-integration-health':
+            return await this.getIntegrationHealth();
+
           default:
             throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
         }
@@ -638,6 +696,42 @@ export class TimeBackMcpServer {
             uri: 'timeback://integration/templates',
             name: 'Integration Templates',
             description: 'Templates for common TimeBack API integrations',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'timeback://integration/patterns',
+            name: 'MCP Integration Patterns',
+            description: 'Available MCP server integration patterns and configurations',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'timeback://integration/servers',
+            name: 'Connected MCP Servers',
+            description: 'List of connected downstream MCP servers and their capabilities',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'timeback://documentation/indexed',
+            name: 'Indexed Documentation',
+            description: 'All indexed TimeBack API documentation and examples',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'timeback://integration/patterns',
+            name: 'TimeBack Integration Patterns',
+            description: 'Available integration patterns and best practices',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'timeback://integration/servers',
+            name: 'Connected MCP Servers',
+            description: 'List of connected downstream MCP servers and their capabilities',
+            mimeType: 'application/json',
+          },
+          {
+            uri: 'timeback://documentation/indexed',
+            name: 'Indexed Documentation',
+            description: 'Searchable TimeBack API documentation and examples',
             mimeType: 'application/json',
           },
         ],
@@ -688,6 +782,44 @@ export class TimeBackMcpServer {
                 uri,
                 mimeType: 'application/json',
                 text: JSON.stringify(this.getIntegrationTemplates(), null, 2),
+              },
+            ],
+          };
+
+        case 'timeback://integration/patterns':
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: 'application/json',
+                text: JSON.stringify(await this.getIntegrationPatterns({}), null, 2),
+              },
+            ],
+          };
+
+        case 'timeback://integration/servers':
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: 'application/json',
+                text: JSON.stringify(this.mcpProxy.getConnectedServers(), null, 2),
+              },
+            ],
+          };
+
+        case 'timeback://documentation/indexed':
+          const indexStats = await this.documentationIndexer.getIndexStats();
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: 'application/json',
+                text: JSON.stringify({
+                  stats: indexStats,
+                  searchEndpoint: 'Use search-comprehensive-docs tool to query indexed documentation',
+                  availableApis: indexStats.apiBreakdown
+                }, null, 2),
               },
             ],
           };
@@ -2054,6 +2186,148 @@ class ${api.charAt(0).toUpperCase() + api.slice(1)}EventTracker:
       }
       throw new IntegrationError(`Getting integration patterns failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
+  }
+
+  async composeIntegrationWorkflow(args: any): Promise<any> {
+    const { name, description, workflow } = args;
+    
+    if (!name || !workflow || !Array.isArray(workflow)) {
+      throw new ValidationError('Missing required parameters: name and workflow array');
+    }
+
+    try {
+      logger.info('Composing integration workflow', { 
+        workflowName: name, 
+        stepCount: workflow.length 
+      });
+
+      const result = await this.toolComposer.composeIntegrationWorkflow({
+        name,
+        description: description || `Integration workflow: ${name}`,
+        steps: workflow
+      });
+
+      return {
+        success: true,
+        workflow: {
+          id: result.id,
+          name: result.name,
+          description: result.description,
+          status: result.status,
+          steps: result.steps.map(step => ({
+            id: step.id,
+            server: step.server,
+            tool: step.tool,
+            status: step.status,
+            result: step.result,
+            error: step.error
+          })),
+          createdAt: result.createdAt,
+          completedAt: result.completedAt
+        },
+        stats: this.toolComposer.getWorkflowStats()
+      };
+    } catch (error) {
+      logger.error('Failed to compose integration workflow:', error);
+      throw new IntegrationError(
+        `Workflow composition failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  }
+
+  private async connectMcpServer(args: any): Promise<any> {
+    const { name, transport, url } = args;
+    
+    logger.info(`Connecting to MCP server: ${name}`, { transport, url });
+
+    try {
+      const connection = {
+        id: `server_${name}_${Date.now()}`,
+        name,
+        transport: transport as any,
+        url,
+        status: 'disconnected' as const,
+        capabilities: { tools: [], resources: [], prompts: [] }
+      };
+
+      await this.integrationManager.getProxy().connectToServer(connection);
+      
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            message: `Successfully connected to MCP server: ${name}`,
+            connection: {
+              id: connection.id,
+              name: connection.name,
+              transport: connection.transport,
+              url: connection.url
+            }
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      logger.error(`Failed to connect to MCP server ${name}:`, error);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+            message: `Failed to connect to MCP server: ${name}`
+          }, null, 2)
+        }]
+      };
+    }
+  }
+
+  private async getIntegrationStatus(): Promise<any> {
+    logger.info('Getting integration status');
+
+    const stats = this.integrationManager.getStats();
+    const patterns = this.integrationManager.getPatterns();
+    const connectedServers = this.integrationManager.getProxy().getConnectedServers();
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          initialized: this.integrationManager.isInitialized(),
+          stats,
+          enabledPatterns: patterns.filter(p => p.enabled).map(p => ({
+            name: p.name,
+            description: p.description,
+            configuration: p.configuration
+          })),
+          connectedServers: connectedServers.map(server => ({
+            id: server.id,
+            name: server.name,
+            status: server.status,
+            transport: server.transport,
+            toolCount: server.capabilities.tools.length,
+            resourceCount: server.capabilities.resources.length
+          }))
+        }, null, 2)
+      }]
+    };
+  }
+
+  private async getIntegrationHealth(): Promise<any> {
+    logger.info('Getting integration health status');
+
+    const healthCheck = await this.integrationManager.healthCheck();
+
+    return {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          status: healthCheck.status,
+          details: healthCheck.details,
+          timestamp: new Date().toISOString()
+        }, null, 2)
+      }]
+    };
   }
 
   async run(): Promise<void> {

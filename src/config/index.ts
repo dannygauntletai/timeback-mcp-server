@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import { IntegrationConfigSchema } from './integration.js';
 
 dotenv.config();
 
@@ -107,6 +108,7 @@ const ConfigSchema = z.object({
       ]),
     }),
   }),
+  integration: IntegrationConfigSchema.optional(),
 });
 
 const config = ConfigSchema.parse({
@@ -163,6 +165,24 @@ const config = ConfigSchema.parse({
       case: [],
       openbadge: [],
       clr: [],
+    },
+  },
+  integration: {
+    enabled: process.env.INTEGRATION_ENABLED === 'true',
+    patterns: {
+      serverChaining: process.env.INTEGRATION_SERVER_CHAINING === 'true',
+      toolComposition: process.env.INTEGRATION_TOOL_COMPOSITION === 'true',
+      sharedResources: process.env.INTEGRATION_SHARED_RESOURCES === 'true',
+      eventDriven: process.env.INTEGRATION_EVENT_DRIVEN === 'true',
+      sseIntegration: process.env.INTEGRATION_SSE === 'true',
+    },
+    downstreamServers: [],
+    sseEndpoints: {
+      enabled: process.env.INTEGRATION_SSE_ENABLED === 'true',
+      port: parseInt(process.env.INTEGRATION_SSE_PORT || '3001'),
+      cors: {
+        origins: process.env.INTEGRATION_SSE_CORS_ORIGINS?.split(',') || ['*'],
+      },
     },
   },
 });

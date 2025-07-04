@@ -1,0 +1,296 @@
+{
+  "name": "assessment-analytics-pipeline",
+  "description": "Create assessments, track student interactions, and generate comprehensive analytics reports",
+  "version": "1.0.0",
+  "author": "TimeBack MCP Server",
+  "patterns": [
+    "server_chaining",
+    "shared_resources",
+    "sse_integration"
+  ],
+  "estimatedDuration": "3-5 minutes",
+  "prerequisites": [
+    "TimeBack MCP Server with QTI and Caliper APIs enabled",
+    "Analytics MCP Server connected",
+    "Valid class and student data"
+  ],
+  "workflow": [
+    {
+      "id": "analyze-class-composition",
+      "name": "Analyze Class Composition",
+      "server": "timeback",
+      "tool": "analyze-codebase-integration",
+      "description": "Analyze class demographics and learning patterns to inform assessment design",
+      "params": {
+        "dataSource": "${input.classData}",
+        "analysisType": "class-composition-analysis",
+        "includeMetrics": [
+          "grade-distribution",
+          "learning-styles",
+          "previous-performance",
+          "engagement-patterns"
+        ]
+      },
+      "timeout": 10000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "create-adaptive-assessments",
+      "name": "Create Adaptive Assessments",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Generate QTI assessments tailored to class composition and learning objectives",
+      "params": {
+        "sourceApi": "oneroster",
+        "targetApi": "qti",
+        "useCase": "adaptive-assessment-creation",
+        "classAnalysis": "${analyze-class-composition.result}",
+        "assessmentConfiguration": {
+          "subject": "${input.subject}",
+          "difficulty": "adaptive",
+          "questionTypes": ["multiple-choice", "short-answer", "drag-drop"],
+          "timeLimit": "${input.timeLimit}",
+          "adaptiveScoring": true,
+          "immediateFeeback": true
+        },
+        "learningObjectives": "${input.learningObjectives}"
+      },
+      "dependsOn": ["analyze-class-composition"],
+      "timeout": 15000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "setup-realtime-tracking",
+      "name": "Setup Real-time Tracking",
+      "server": "analytics-server",
+      "tool": "initialize-realtime-tracking",
+      "description": "Configure Caliper analytics for real-time assessment tracking",
+      "params": {
+        "assessments": "${create-adaptive-assessments.result.assessments}",
+        "classId": "${input.classId}",
+        "trackingConfiguration": {
+          "eventTypes": [
+            "assessment-started",
+            "item-response",
+            "navigation-event",
+            "assessment-completed",
+            "time-tracking"
+          ],
+          "realTimeAnalytics": true,
+          "anomalyDetection": true,
+          "engagementMetrics": true
+        }
+      },
+      "dependsOn": ["create-adaptive-assessments"],
+      "timeout": 8000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "deploy-assessments",
+      "name": "Deploy Assessments",
+      "server": "timeback",
+      "tool": "validate-api-integration",
+      "description": "Deploy assessments and validate integration points",
+      "params": {
+        "integrationPoints": [
+          "${create-adaptive-assessments.result}",
+          "${setup-realtime-tracking.result}"
+        ],
+        "validationLevel": "deployment-ready",
+        "deploymentConfiguration": {
+          "releaseDate": "${input.releaseDate}",
+          "accessWindow": "${input.accessWindow}",
+          "studentNotifications": true,
+          "teacherDashboard": true
+        }
+      },
+      "dependsOn": ["setup-realtime-tracking"],
+      "timeout": 10000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "monitor-assessment-session",
+      "name": "Monitor Assessment Session",
+      "server": "analytics-server",
+      "tool": "monitor-live-session",
+      "description": "Real-time monitoring of assessment session with live analytics",
+      "params": {
+        "assessmentDeployment": "${deploy-assessments.result}",
+        "monitoringConfiguration": {
+          "liveUpdates": true,
+          "alertThresholds": {
+            "technicalIssues": 0.05,
+            "suspiciousActivity": 0.02,
+            "disengagement": 0.1
+          },
+          "interventionTriggers": {
+            "technicalSupport": true,
+            "teacherNotification": true,
+            "adaptiveDifficulty": true
+          }
+        }
+      },
+      "dependsOn": ["deploy-assessments"],
+      "timeout": 30000,
+      "retries": 1,
+      "required": true,
+      "continuous": true
+    },
+    {
+      "id": "generate-interim-analytics",
+      "name": "Generate Interim Analytics",
+      "server": "analytics-server",
+      "tool": "generate-interim-report",
+      "description": "Generate real-time analytics during assessment session",
+      "params": {
+        "sessionMonitoring": "${monitor-assessment-session.result}",
+        "analyticsConfiguration": {
+          "reportTypes": [
+            "completion-rates",
+            "response-patterns",
+            "difficulty-analysis",
+            "engagement-metrics",
+            "performance-distribution"
+          ],
+          "updateFrequency": "5-minutes",
+          "visualizations": true,
+          "exportFormats": ["json", "csv", "pdf"]
+        }
+      },
+      "dependsOn": ["monitor-assessment-session"],
+      "timeout": 12000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "compile-final-results",
+      "name": "Compile Final Results",
+      "server": "analytics-server",
+      "tool": "compile-assessment-results",
+      "description": "Compile comprehensive assessment results and analytics",
+      "params": {
+        "sessionData": "${monitor-assessment-session.result}",
+        "interimAnalytics": "${generate-interim-analytics.result}",
+        "compilationConfiguration": {
+          "includeIndividualResults": true,
+          "includeClassAnalytics": true,
+          "includeLearningInsights": true,
+          "includeRecommendations": true,
+          "gradebookIntegration": true,
+          "parentReports": true
+        }
+      },
+      "dependsOn": ["generate-interim-analytics"],
+      "timeout": 15000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "generate-insights-report",
+      "name": "Generate Learning Insights Report",
+      "server": "timeback",
+      "tool": "analyze-codebase-integration",
+      "description": "Generate actionable learning insights from assessment data",
+      "params": {
+        "dataSource": "${compile-final-results.result}",
+        "analysisType": "learning-insights-analysis",
+        "insightConfiguration": {
+          "learningGaps": true,
+          "strengthAreas": true,
+          "recommendedInterventions": true,
+          "nextSteps": true,
+          "differentiation": true,
+          "masteryPredictions": true
+        }
+      },
+      "dependsOn": ["compile-final-results"],
+      "timeout": 12000,
+      "retries": 2,
+      "required": true
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "classId": { "type": "string", "description": "Unique identifier for the class" },
+      "classData": {
+        "type": "object",
+        "description": "Class demographic and performance data"
+      },
+      "subject": { 
+        "type": "string", 
+        "enum": ["mathematics", "science", "english", "social-studies"],
+        "description": "Subject area for the assessment"
+      },
+      "learningObjectives": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Learning objectives to assess"
+      },
+      "timeLimit": { 
+        "type": "integer", 
+        "minimum": 10, 
+        "maximum": 180,
+        "description": "Time limit in minutes"
+      },
+      "releaseDate": { 
+        "type": "string", 
+        "format": "date-time",
+        "description": "When to release the assessment"
+      },
+      "accessWindow": {
+        "type": "object",
+        "properties": {
+          "start": { "type": "string", "format": "date-time" },
+          "end": { "type": "string", "format": "date-time" }
+        },
+        "description": "Time window when students can access the assessment"
+      }
+    },
+    "required": ["classId", "subject", "learningObjectives", "timeLimit"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "assessmentId": { "type": "string" },
+      "deploymentStatus": { "type": "string" },
+      "sessionResults": { "type": "object" },
+      "analytics": { "type": "object" },
+      "learningInsights": { "type": "object" },
+      "recommendations": { "type": "array" },
+      "executionSummary": {
+        "type": "object",
+        "properties": {
+          "totalSteps": { "type": "integer" },
+          "successfulSteps": { "type": "integer" },
+          "executionTime": { "type": "string" },
+          "studentsAssessed": { "type": "integer" },
+          "completionRate": { "type": "number" }
+        }
+      }
+    }
+  },
+  "errorHandling": {
+    "strategy": "continue-on-error",
+    "maxFailures": 2,
+    "rollbackOnFailure": false,
+    "criticalSteps": ["create-adaptive-assessments", "deploy-assessments"]
+  },
+  "notifications": {
+    "onStart": true,
+    "onComplete": true,
+    "onError": true,
+    "onStepComplete": false,
+    "channels": ["sse", "dashboard"]
+  },
+  "metadata": {
+    "tags": ["assessment", "analytics", "real-time", "adaptive"],
+    "complexity": "medium",
+    "dataPrivacy": "FERPA-compliant"
+  }
+}

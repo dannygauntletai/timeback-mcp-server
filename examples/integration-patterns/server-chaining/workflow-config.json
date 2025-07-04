@@ -1,0 +1,130 @@
+{
+  "name": "student-assessment-workflow",
+  "description": "Complete student assessment pipeline using multiple MCP servers",
+  "version": "1.0.0",
+  "workflow": [
+    {
+      "id": "fetch-class-roster",
+      "server": "oneroster-server",
+      "tool": "get-class-students",
+      "description": "Fetch all students in the target class",
+      "params": {
+        "classId": "class-math-101",
+        "includeEnrollments": true,
+        "includeGrades": true
+      },
+      "timeout": 10000,
+      "retries": 2
+    },
+    {
+      "id": "analyze-student-data",
+      "server": "timeback",
+      "tool": "analyze-codebase-integration",
+      "description": "Analyze student data patterns for assessment personalization",
+      "params": {
+        "dataSource": "${fetch-class-roster.result.students}",
+        "analysisType": "student-profiling"
+      },
+      "dependsOn": ["fetch-class-roster"],
+      "timeout": 15000
+    },
+    {
+      "id": "create-personalized-assessments",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Create QTI assessments tailored to each student",
+      "params": {
+        "sourceApi": "oneroster",
+        "targetApi": "qti",
+        "useCase": "personalized-assessment",
+        "studentProfiles": "${analyze-student-data.result.profiles}",
+        "subject": "mathematics",
+        "difficulty": "adaptive"
+      },
+      "dependsOn": ["analyze-student-data"],
+      "timeout": 20000
+    },
+    {
+      "id": "setup-caliper-tracking",
+      "server": "analytics-server",
+      "tool": "create-tracking-profile",
+      "description": "Setup Caliper analytics for assessment tracking",
+      "params": {
+        "assessments": "${create-personalized-assessments.result.assessments}",
+        "students": "${fetch-class-roster.result.students}",
+        "trackingLevel": "detailed",
+        "realTimeUpdates": true
+      },
+      "dependsOn": ["create-personalized-assessments"],
+      "timeout": 10000
+    },
+    {
+      "id": "configure-powerpath-mastery",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Configure PowerPath mastery tracking",
+      "params": {
+        "sourceApi": "qti",
+        "targetApi": "powerpath",
+        "useCase": "mastery-tracking",
+        "assessmentData": "${create-personalized-assessments.result}",
+        "masteryThreshold": 0.8,
+        "adaptivePath": true
+      },
+      "dependsOn": ["create-personalized-assessments"],
+      "timeout": 15000
+    },
+    {
+      "id": "align-case-standards",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Align assessments with CASE academic standards",
+      "params": {
+        "sourceApi": "qti",
+        "targetApi": "case",
+        "useCase": "standards-alignment",
+        "assessmentData": "${create-personalized-assessments.result}",
+        "standardsFramework": "common-core-math",
+        "gradeLevel": "grade-6"
+      },
+      "dependsOn": ["create-personalized-assessments"],
+      "timeout": 10000
+    },
+    {
+      "id": "finalize-workflow",
+      "server": "timeback",
+      "tool": "validate-api-integration",
+      "description": "Validate the complete integration workflow",
+      "params": {
+        "integrationPoints": [
+          "${setup-caliper-tracking.result}",
+          "${configure-powerpath-mastery.result}",
+          "${align-case-standards.result}"
+        ],
+        "validationLevel": "comprehensive"
+      },
+      "dependsOn": [
+        "setup-caliper-tracking",
+        "configure-powerpath-mastery", 
+        "align-case-standards"
+      ],
+      "timeout": 10000
+    }
+  ],
+  "errorHandling": {
+    "strategy": "continue-on-error",
+    "maxFailures": 2,
+    "rollbackOnFailure": false
+  },
+  "notifications": {
+    "onStart": true,
+    "onComplete": true,
+    "onError": true,
+    "onStepComplete": true
+  },
+  "metadata": {
+    "author": "TimeBack MCP Server",
+    "tags": ["education", "assessment", "analytics", "standards"],
+    "estimatedDuration": "2-3 minutes"
+  }
+}

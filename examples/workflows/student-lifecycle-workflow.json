@@ -1,0 +1,372 @@
+{
+  "name": "complete-student-lifecycle",
+  "description": "End-to-end student management from enrollment through graduation with comprehensive tracking and analytics",
+  "version": "1.0.0",
+  "author": "TimeBack MCP Server",
+  "patterns": [
+    "server_chaining",
+    "tool_composition", 
+    "event_driven",
+    "shared_resources"
+  ],
+  "estimatedDuration": "8-12 minutes",
+  "prerequisites": [
+    "OneRoster MCP Server connected",
+    "Analytics MCP Server connected", 
+    "TimeBack MCP Server with all APIs enabled",
+    "Valid student data and class information"
+  ],
+  "workflow": [
+    {
+      "id": "initialize-student-profile",
+      "name": "Initialize Student Profile",
+      "server": "oneroster-server",
+      "tool": "create-comprehensive-student-profile",
+      "description": "Create complete student profile with demographic and academic information",
+      "params": {
+        "studentData": {
+          "givenName": "${input.student.firstName}",
+          "familyName": "${input.student.lastName}",
+          "email": "${input.student.email}",
+          "grade": "${input.student.grade}",
+          "dateOfBirth": "${input.student.dateOfBirth}",
+          "parentContact": "${input.student.parentEmail}"
+        },
+        "academicInfo": {
+          "previousSchool": "${input.student.previousSchool}",
+          "academicLevel": "${input.student.academicLevel}",
+          "specialNeeds": "${input.student.specialNeeds}",
+          "languagePreference": "${input.student.language}"
+        }
+      },
+      "timeout": 15000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "enroll-in-courses",
+      "name": "Course Enrollment",
+      "server": "oneroster-server",
+      "tool": "bulk-course-enrollment",
+      "description": "Enroll student in appropriate courses based on grade level and academic history",
+      "params": {
+        "studentId": "${initialize-student-profile.result.userId}",
+        "enrollments": [
+          {
+            "classId": "${input.courses.mathematics}",
+            "role": "student",
+            "startDate": "${input.academicYear.startDate}",
+            "endDate": "${input.academicYear.endDate}"
+          },
+          {
+            "classId": "${input.courses.science}",
+            "role": "student", 
+            "startDate": "${input.academicYear.startDate}",
+            "endDate": "${input.academicYear.endDate}"
+          },
+          {
+            "classId": "${input.courses.english}",
+            "role": "student",
+            "startDate": "${input.academicYear.startDate}",
+            "endDate": "${input.academicYear.endDate}"
+          },
+          {
+            "classId": "${input.courses.socialStudies}",
+            "role": "student",
+            "startDate": "${input.academicYear.startDate}",
+            "endDate": "${input.academicYear.endDate}"
+          }
+        ]
+      },
+      "dependsOn": ["initialize-student-profile"],
+      "timeout": 20000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "create-initial-assessments",
+      "name": "Create Initial Assessments",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Create initial diagnostic assessments for each enrolled course",
+      "params": {
+        "sourceApi": "oneroster",
+        "targetApi": "qti",
+        "useCase": "diagnostic-assessment-creation",
+        "studentProfile": "${initialize-student-profile.result}",
+        "enrollments": "${enroll-in-courses.result.enrollments}",
+        "assessmentTypes": [
+          {
+            "subject": "mathematics",
+            "type": "diagnostic",
+            "difficulty": "adaptive",
+            "duration": 30
+          },
+          {
+            "subject": "science", 
+            "type": "diagnostic",
+            "difficulty": "grade-appropriate",
+            "duration": 25
+          },
+          {
+            "subject": "english",
+            "type": "diagnostic",
+            "difficulty": "reading-level-adaptive",
+            "duration": 35
+          }
+        ]
+      },
+      "dependsOn": ["enroll-in-courses"],
+      "timeout": 25000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "setup-analytics-tracking",
+      "name": "Setup Analytics Tracking",
+      "server": "analytics-server",
+      "tool": "create-comprehensive-tracking-profile",
+      "description": "Setup Caliper analytics tracking for all student activities",
+      "params": {
+        "studentId": "${initialize-student-profile.result.userId}",
+        "enrollments": "${enroll-in-courses.result.enrollments}",
+        "assessments": "${create-initial-assessments.result.assessments}",
+        "trackingConfiguration": {
+          "eventTypes": ["assessment", "navigation", "outcome", "session", "annotation"],
+          "realTimeUpdates": true,
+          "dataRetention": "7-years",
+          "privacyLevel": "student-controlled",
+          "parentNotifications": true
+        }
+      },
+      "dependsOn": ["create-initial-assessments"],
+      "timeout": 15000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "initialize-mastery-paths",
+      "name": "Initialize Mastery Learning Paths",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Setup PowerPath mastery learning objectives for each course",
+      "params": {
+        "sourceApi": "qti",
+        "targetApi": "powerpath",
+        "useCase": "mastery-path-initialization",
+        "studentProfile": "${initialize-student-profile.result}",
+        "assessmentResults": "${create-initial-assessments.result}",
+        "courseEnrollments": "${enroll-in-courses.result.enrollments}",
+        "masteryConfiguration": {
+          "adaptivePath": true,
+          "masteryThreshold": 0.8,
+          "prerequisiteEnforcement": true,
+          "personalizedPacing": true
+        }
+      },
+      "dependsOn": ["setup-analytics-tracking"],
+      "timeout": 20000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "align-standards",
+      "name": "Align with Academic Standards",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Align all learning objectives with CASE academic standards",
+      "params": {
+        "sourceApi": "powerpath",
+        "targetApi": "case",
+        "useCase": "standards-alignment",
+        "masteryPaths": "${initialize-mastery-paths.result.paths}",
+        "gradeLevel": "${input.student.grade}",
+        "standardsFrameworks": [
+          "common-core-mathematics",
+          "next-generation-science-standards",
+          "common-core-english-language-arts",
+          "national-social-studies-standards"
+        ]
+      },
+      "dependsOn": ["initialize-mastery-paths"],
+      "timeout": 18000,
+      "retries": 2,
+      "required": false
+    },
+    {
+      "id": "create-learning-portfolio",
+      "name": "Create Digital Learning Portfolio",
+      "server": "timeback",
+      "tool": "generate-integration-mapping",
+      "description": "Create comprehensive digital portfolio for tracking student progress",
+      "params": {
+        "sourceApi": "caliper",
+        "targetApi": "openbadge",
+        "useCase": "portfolio-creation",
+        "studentProfile": "${initialize-student-profile.result}",
+        "trackingProfile": "${setup-analytics-tracking.result}",
+        "masteryPaths": "${initialize-mastery-paths.result.paths}",
+        "standardsAlignments": "${align-standards.result.alignments}",
+        "portfolioConfiguration": {
+          "includeAchievements": true,
+          "includeBadges": true,
+          "includeReflections": true,
+          "parentAccess": true,
+          "peerSharing": false
+        }
+      },
+      "dependsOn": ["align-standards"],
+      "timeout": 15000,
+      "retries": 2,
+      "required": false
+    },
+    {
+      "id": "setup-progress-monitoring",
+      "name": "Setup Progress Monitoring",
+      "server": "analytics-server",
+      "tool": "create-monitoring-dashboard",
+      "description": "Create real-time progress monitoring for teachers and parents",
+      "params": {
+        "studentId": "${initialize-student-profile.result.userId}",
+        "trackingProfile": "${setup-analytics-tracking.result}",
+        "masteryPaths": "${initialize-mastery-paths.result.paths}",
+        "portfolio": "${create-learning-portfolio.result}",
+        "monitoringConfiguration": {
+          "teacherDashboard": true,
+          "parentDashboard": true,
+          "studentDashboard": true,
+          "alertThresholds": {
+            "strugglingStudent": 0.6,
+            "disengagement": 3,
+            "masteryAchievement": 0.9
+          },
+          "reportingFrequency": "weekly"
+        }
+      },
+      "dependsOn": ["create-learning-portfolio"],
+      "timeout": 12000,
+      "retries": 2,
+      "required": true
+    },
+    {
+      "id": "validate-complete-setup",
+      "name": "Validate Complete Student Setup",
+      "server": "timeback",
+      "tool": "validate-api-integration",
+      "description": "Comprehensive validation of all student lifecycle components",
+      "params": {
+        "integrationPoints": [
+          "${initialize-student-profile.result}",
+          "${enroll-in-courses.result}",
+          "${create-initial-assessments.result}",
+          "${setup-analytics-tracking.result}",
+          "${initialize-mastery-paths.result}",
+          "${align-standards.result}",
+          "${create-learning-portfolio.result}",
+          "${setup-progress-monitoring.result}"
+        ],
+        "validationLevel": "comprehensive",
+        "healthChecks": [
+          "data-integrity",
+          "api-connectivity",
+          "permission-validation",
+          "workflow-completeness"
+        ]
+      },
+      "dependsOn": ["setup-progress-monitoring"],
+      "timeout": 10000,
+      "retries": 1,
+      "required": true
+    }
+  ],
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "student": {
+        "type": "object",
+        "properties": {
+          "firstName": { "type": "string" },
+          "lastName": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "grade": { "type": "integer", "minimum": 1, "maximum": 12 },
+          "dateOfBirth": { "type": "string", "format": "date" },
+          "parentEmail": { "type": "string", "format": "email" },
+          "previousSchool": { "type": "string" },
+          "academicLevel": { "type": "string", "enum": ["below-grade", "at-grade", "above-grade"] },
+          "specialNeeds": { "type": "array", "items": { "type": "string" } },
+          "language": { "type": "string", "default": "en" }
+        },
+        "required": ["firstName", "lastName", "email", "grade", "parentEmail"]
+      },
+      "courses": {
+        "type": "object",
+        "properties": {
+          "mathematics": { "type": "string" },
+          "science": { "type": "string" },
+          "english": { "type": "string" },
+          "socialStudies": { "type": "string" }
+        },
+        "required": ["mathematics", "science", "english"]
+      },
+      "academicYear": {
+        "type": "object",
+        "properties": {
+          "startDate": { "type": "string", "format": "date" },
+          "endDate": { "type": "string", "format": "date" }
+        },
+        "required": ["startDate", "endDate"]
+      }
+    },
+    "required": ["student", "courses", "academicYear"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "studentId": { "type": "string" },
+      "enrollments": { "type": "array" },
+      "assessments": { "type": "array" },
+      "trackingProfile": { "type": "object" },
+      "masteryPaths": { "type": "array" },
+      "standardsAlignments": { "type": "array" },
+      "portfolio": { "type": "object" },
+      "monitoringDashboard": { "type": "object" },
+      "validationResults": { "type": "object" },
+      "executionSummary": {
+        "type": "object",
+        "properties": {
+          "totalSteps": { "type": "integer" },
+          "successfulSteps": { "type": "integer" },
+          "failedSteps": { "type": "integer" },
+          "executionTime": { "type": "string" },
+          "integrationHealth": { "type": "string" }
+        }
+      }
+    }
+  },
+  "errorHandling": {
+    "strategy": "continue-on-optional-failure",
+    "rollbackOnCriticalFailure": true,
+    "criticalSteps": [
+      "initialize-student-profile",
+      "enroll-in-courses", 
+      "setup-analytics-tracking",
+      "validate-complete-setup"
+    ],
+    "maxRetries": 2,
+    "retryDelay": 2000
+  },
+  "notifications": {
+    "onStart": true,
+    "onComplete": true,
+    "onError": true,
+    "onStepComplete": true,
+    "channels": ["sse", "email", "dashboard"]
+  },
+  "metadata": {
+    "tags": ["student-lifecycle", "enrollment", "assessment", "analytics", "mastery-learning"],
+    "complexity": "high",
+    "dataPrivacy": "FERPA-compliant",
+    "auditTrail": true
+  }
+}

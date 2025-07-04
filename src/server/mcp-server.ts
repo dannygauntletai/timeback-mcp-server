@@ -12,21 +12,126 @@ import { z } from 'zod';
 import { OpenAPIParser } from '../services/openapi-parser.js';
 import { AuthService } from '../services/auth.js';
 import { CodebaseAnalyzer, CodebaseAnalysis } from '../services/codebase-analyzer.js';
+import { DocumentationCrawler } from '../services/documentation-crawler.js';
+import { DocumentationIndexer } from '../services/documentation-indexer.js';
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const AnalyzeCodebaseSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  includeCodeExamples: z.boolean().optional().default(true),
+  focusAreas: z.array(z.string()).optional(),
+});
+
+const GenerateIntegrationCodeSchema = z.object({
+  language: z.enum(['javascript', 'typescript', 'python', 'java']),
+  framework: z.string().min(1, 'Framework is required'),
+  integrationPattern: z.enum(['oauth-setup', 'data-sync', 'event-tracking', 'assessment-delivery', 'standards-alignment']),
+  apis: z.array(z.string()).min(1, 'At least one API is required'),
+});
+
+const DetectIntegrationOpportunitiesSchema = z.object({
+  projectPath: z.string().min(1, 'Project path is required'),
+  analysisDepth: z.enum(['shallow', 'deep']).optional().default('deep'),
+});
+
+const AnalyzeApiEndpointsSchema = z.object({
+  api: z.string().optional(),
+  tag: z.string().optional(),
+  method: z.string().optional(),
+});
+
+const SearchApiDocumentationSchema = z.object({
+  query: z.string().min(1, 'Search query is required'),
+  api: z.string().optional(),
+  includeSchemas: z.boolean().optional().default(true),
+});
+
+const CompareDataModelsSchema = z.object({
+  sourceApi: z.string().min(1, 'Source API is required'),
+  targetApi: z.string().min(1, 'Target API is required'),
+  sourceSchema: z.string().min(1, 'Source schema is required'),
+  targetSchema: z.string().min(1, 'Target schema is required'),
+});
+
+const GenerateIntegrationMappingSchema = z.object({
+  sourceApi: z.string().min(1, 'Source API is required'),
+  targetApi: z.string().min(1, 'Target API is required'),
+  useCase: z.string().min(1, 'Use case is required'),
+});
+
+const ValidateApiIntegrationSchema = z.object({
+  api: z.string().min(1, 'API is required'),
+  configuration: z.record(z.any()),
+});
+
+const CrawlTimeBackDocumentationSchema = z.object({
+  forceRefresh: z.boolean().optional().default(false),
+  specificApis: z.array(z.string()).optional(),
+});
+
+const SearchComprehensiveDocsSchema = z.object({
+  query: z.string().min(1),
+  apis: z.array(z.string()).optional(),
+  types: z.array(z.enum(['endpoint', 'schema', 'code_example', 'concept'])).optional(),
+  limit: z.number().min(1).max(100).optional().default(20),
+});
+
+const GetApiExamplesSchema = z.object({
+  api: z.string().optional(),
+  language: z.string().optional(),
+  endpoint: z.string().optional(),
+  useCase: z.string().optional(),
+});
+
+const CompareApiImplementationsSchema = z.object({
+  sourceApi: z.string(),
+  targetApi: z.string(),
+  functionality: z.string(),
+});
+
+const GetIntegrationPatternsSchema = z.object({
+  apis: z.array(z.string()).optional(),
+  difficulty: z.enum(['beginner', 'intermediate', 'advanced']).optional(),
+  useCase: z.string().optional(),
+});
+
+export class ValidationError extends Error {
+  constructor(message: string, public details?: any) {
+    super(message);
+    this.name = 'ValidationError';
+  }
+}
+
+export class ConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConfigurationError';
+  }
+}
+
+export class IntegrationError extends Error {
+  constructor(message: string, public api?: string) {
+    super(message);
+    this.name = 'IntegrationError';
+  }
+}
+
+const projectDir = process.cwd();
 
 export class TimeBackMcpServer {
   private server: Server;
   private openApiParser: OpenAPIParser;
   private authService: AuthService;
   private codebaseAnalyzer: CodebaseAnalyzer;
+  private documentationCrawler: DocumentationCrawler;
+  private documentationIndexer: DocumentationIndexer;
 
   constructor() {
+    this.validateConfiguration();
+    
     this.server = new Server(
       {
         name: config.server.name,
@@ -43,8 +148,44 @@ export class TimeBackMcpServer {
     this.openApiParser = new OpenAPIParser();
     this.authService = new AuthService();
     this.codebaseAnalyzer = new CodebaseAnalyzer();
+    this.documentationCrawler = new DocumentationCrawler();
+    this.documentationIndexer = new DocumentationIndexer();
     
     this.setupHandlers();
+    
+    logger.info('TimeBack MCP Server initialized', {
+      name: config.server.name,
+      version: config.server.version,
+      logLevel: config.logging.level
+    });
+  }
+
+  private validateConfiguration(): void {
+    const requiredEnvVars = [
+      'CLIENT_ID',
+      'CLIENT_SECRET',
+      'OAUTH2_TOKEN_URL'
+    ];
+
+    const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+    
+    if (missingVars.length > 0) {
+      const message = `Missing required environment variables: ${missingVars.join(', ')}`;
+      logger.error('Configuration validation failed', { missingVars });
+      throw new ConfigurationError(message);
+    }
+
+    const timebackApis = ['qti', 'oneroster', 'caliper', 'powerpath', 'case'];
+    const missingApiUrls = timebackApis.filter(api => {
+      const envVar = `TIMEBACK_${api.toUpperCase()}_BASE_URL`;
+      return !process.env[envVar];
+    });
+
+    if (missingApiUrls.length > 0) {
+      logger.warn('Some TimeBack API URLs not configured', { missingApiUrls });
+    }
+
+    logger.info('Configuration validation passed');
   }
 
   private setupHandlers(): void {
@@ -281,6 +422,129 @@ export class TimeBackMcpServer {
               required: ['projectPath'],
             },
           },
+          {
+            name: 'crawl-timeback-documentation',
+            description: 'Crawl and index TimeBack platform documentation from all APIs',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                forceRefresh: {
+                  type: 'boolean',
+                  description: 'Force refresh of all documentation even if already cached',
+                  default: false,
+                },
+                specificApis: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Crawl only specific APIs (QTI, OneRoster, Caliper, PowerPath, CASE, OpenBadge, CLR)',
+                },
+              },
+            },
+          },
+          {
+            name: 'search-comprehensive-docs',
+            description: 'Search across all crawled TimeBack documentation with advanced filtering',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'Search query to find relevant documentation',
+                },
+                apis: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Filter results to specific APIs',
+                },
+                types: {
+                  type: 'array',
+                  items: { 
+                    type: 'string',
+                    enum: ['endpoint', 'schema', 'code_example', 'concept']
+                  },
+                  description: 'Filter results to specific content types',
+                },
+                limit: {
+                  type: 'number',
+                  minimum: 1,
+                  maximum: 100,
+                  default: 20,
+                  description: 'Maximum number of results to return',
+                },
+              },
+              required: ['query'],
+            },
+          },
+          {
+            name: 'get-api-examples',
+            description: 'Get real code examples from TimeBack documentation',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                api: {
+                  type: 'string',
+                  description: 'Specific API to get examples for',
+                },
+                language: {
+                  type: 'string',
+                  description: 'Programming language for examples (javascript, python, curl, etc.)',
+                },
+                endpoint: {
+                  type: 'string',
+                  description: 'Specific endpoint to get examples for',
+                },
+                useCase: {
+                  type: 'string',
+                  description: 'Specific use case or functionality to find examples for',
+                },
+              },
+            },
+          },
+          {
+            name: 'compare-api-implementations',
+            description: 'Compare similar functionality across different TimeBack APIs',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                sourceApi: {
+                  type: 'string',
+                  description: 'Source API to compare from',
+                },
+                targetApi: {
+                  type: 'string',
+                  description: 'Target API to compare to',
+                },
+                functionality: {
+                  type: 'string',
+                  description: 'Specific functionality to compare (e.g., "user management", "authentication")',
+                },
+              },
+              required: ['sourceApi', 'targetApi', 'functionality'],
+            },
+          },
+          {
+            name: 'get-integration-patterns',
+            description: 'Get integration patterns and workflows from TimeBack documentation',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                apis: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'APIs to include in integration patterns',
+                },
+                difficulty: {
+                  type: 'string',
+                  enum: ['beginner', 'intermediate', 'advanced'],
+                  description: 'Filter patterns by difficulty level',
+                },
+                useCase: {
+                  type: 'string',
+                  description: 'Specific use case to find patterns for',
+                },
+              },
+            },
+          },
         ],
       };
     });
@@ -319,6 +583,21 @@ export class TimeBackMcpServer {
 
           case 'detect-integration-opportunities':
             return await this.detectIntegrationOpportunities(args);
+
+          case 'crawl-timeback-documentation':
+            return await this.crawlTimeBackDocumentation(args);
+
+          case 'search-comprehensive-docs':
+            return await this.searchComprehensiveDocs(args);
+
+          case 'get-api-examples':
+            return await this.getApiExamples(args);
+
+          case 'compare-api-implementations':
+            return await this.compareApiImplementations(args);
+
+          case 'get-integration-patterns':
+            return await this.getIntegrationPatterns(args);
 
           default:
             throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
@@ -421,7 +700,7 @@ export class TimeBackMcpServer {
 
   private async loadTimeBackSpecs(): Promise<any> {
     try {
-      const specsDir = path.resolve(__dirname, '../../openapi-specs');
+      const specsDir = path.resolve(projectDir, 'openapi-specs');
       
       await Promise.all([
         this.openApiParser.loadFromFile('qti', `${specsDir}/timeback-qti-openapi.yaml`, config.timeback.qti.baseUrl),
@@ -699,10 +978,22 @@ All APIs are now ready for analysis and integration assistance.`,
   }
 
   private async analyzeCodebaseForTimeBack(args: any): Promise<any> {
-    const { projectPath, includeCodeExamples = true, focusAreas } = args;
+    const validatedArgs = AnalyzeCodebaseSchema.parse(args);
+    const { projectPath, includeCodeExamples, focusAreas } = validatedArgs;
     
     try {
-      logger.info(`Analyzing codebase at: ${projectPath}`);
+      logger.info(`Analyzing codebase at: ${projectPath}`, { 
+        includeCodeExamples, 
+        focusAreas: focusAreas?.length || 0 
+      });
+      
+      const fs = await import('fs/promises');
+      try {
+        await fs.access(projectPath);
+      } catch (error) {
+        throw new ValidationError(`Project path does not exist or is not accessible: ${projectPath}`);
+      }
+      
       const analysis = await this.codebaseAnalyzer.analyzeCodebase(projectPath);
       
       let filteredSuggestions = analysis.suggestedIntegrations;
@@ -749,39 +1040,103 @@ All APIs are now ready for analysis and integration assistance.`,
         ],
       };
     } catch (error) {
-      logger.error('Codebase analysis failed:', error);
-      throw new Error(`Failed to analyze codebase: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if (error instanceof ValidationError) {
+        logger.warn('Codebase analysis validation failed:', { 
+          message: error.message, 
+          details: error.details,
+          projectPath 
+        });
+        throw error;
+      }
+      
+      logger.error('Codebase analysis failed:', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        projectPath 
+      });
+      
+      throw new IntegrationError(
+        `Failed to analyze codebase: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'codebase-analyzer'
+      );
     }
   }
 
   private async generateIntegrationCode(args: any): Promise<any> {
-    const { language, framework, integrationPattern, apis } = args;
+    const validatedArgs = GenerateIntegrationCodeSchema.parse(args);
+    const { language, framework, integrationPattern, apis } = validatedArgs;
     
-    const codeTemplates = this.getCodeTemplates(language, framework, integrationPattern, apis);
+    try {
+      logger.info('Generating integration code', { 
+        language, 
+        framework, 
+        integrationPattern, 
+        apis: apis.length 
+      });
+      
+      const codeTemplates = this.getCodeTemplates(language, framework, integrationPattern, apis);
     
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            language,
-            framework,
-            integrationPattern,
-            apis,
-            codeExamples: codeTemplates,
-            environmentVariables: this.getRequiredEnvVars(apis),
-            dependencies: this.getRequiredDependencies(language, framework, apis),
-            setupInstructions: this.getSetupInstructions(language, framework, integrationPattern),
-          }, null, 2),
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              language,
+              framework,
+              integrationPattern,
+              apis,
+              codeExamples: codeTemplates,
+              environmentVariables: this.getRequiredEnvVars(apis),
+              dependencies: this.getRequiredDependencies(language, framework, apis),
+              setupInstructions: this.getSetupInstructions(language, framework, integrationPattern),
+            }, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      if (error instanceof ValidationError) {
+        logger.warn('Integration code generation validation failed:', { 
+          message: error.message, 
+          details: error.details,
+          language,
+          framework,
+          integrationPattern 
+        });
+        throw error;
+      }
+      
+      logger.error('Integration code generation failed:', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        language,
+        framework,
+        integrationPattern 
+      });
+      
+      throw new IntegrationError(
+        `Failed to generate integration code: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'code-generator'
+      );
+    }
   }
 
   private async detectIntegrationOpportunities(args: any): Promise<any> {
-    const { projectPath, analysisDepth = 'deep' } = args;
+    const validatedArgs = DetectIntegrationOpportunitiesSchema.parse(args);
+    const { projectPath, analysisDepth } = validatedArgs;
     
     try {
+      logger.info('Detecting integration opportunities', { 
+        projectPath, 
+        analysisDepth 
+      });
+      
+      const fs = await import('fs/promises');
+      try {
+        await fs.access(projectPath);
+      } catch (error) {
+        throw new ValidationError(`Project path does not exist or is not accessible: ${projectPath}`);
+      }
+      
       const analysis = await this.codebaseAnalyzer.analyzeCodebase(projectPath);
       
       const opportunities = {
@@ -844,8 +1199,25 @@ All APIs are now ready for analysis and integration assistance.`,
         ],
       };
     } catch (error) {
-      logger.error('Integration opportunity detection failed:', error);
-      throw new Error(`Failed to detect opportunities: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      if (error instanceof ValidationError) {
+        logger.warn('Integration opportunity detection validation failed:', { 
+          message: error.message,
+          projectPath 
+        });
+        throw error;
+      }
+      
+      logger.error('Integration opportunity detection failed:', { 
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+        projectPath,
+        analysisDepth 
+      });
+      
+      throw new IntegrationError(
+        `Failed to detect integration opportunities: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'opportunity-detector'
+      );
     }
   }
 
@@ -1001,18 +1373,228 @@ class ${api.charAt(0).toUpperCase() + api.slice(1)}Client:
   }
 
   private getDataSyncTemplate(language: string, framework: string, api: string): any {
+    const baseUrl = config.timeback[api as keyof typeof config.timeback]?.baseUrl || '';
+    
+    if (language === 'javascript' || language === 'typescript') {
+      return {
+        api,
+        pattern: 'data-sync',
+        code: `// ${api.toUpperCase()} Data Sync Implementation
+const { ${api.charAt(0).toUpperCase() + api.slice(1)}Client } = require('./${api}-client');
+
+class ${api.charAt(0).toUpperCase() + api.slice(1)}DataSync {
+  constructor(clientId, clientSecret) {
+    this.client = new ${api.charAt(0).toUpperCase() + api.slice(1)}Client(clientId, clientSecret);
+    this.syncInterval = 5 * 60 * 1000; // 5 minutes
+  }
+
+  async syncData(localData) {
+    try {
+      const transformedData = this.transformToTimeBackFormat(localData);
+      
+      const response = await this.client.makeRequest('/sync', {
+        method: 'POST',
+        data: transformedData,
+      });
+      
+      console.log('Data sync successful:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Data sync failed:', error);
+      throw error;
+    }
+  }
+
+  transformToTimeBackFormat(data) {
+    return data.map(item => ({
+      id: item.id,
+    }));
+  }
+
+  startAutoSync() {
+    setInterval(() => {
+      this.syncData(this.getLocalData());
+    }, this.syncInterval);
+  }
+}
+
+module.exports = ${api.charAt(0).toUpperCase() + api.slice(1)}DataSync;`,
+      };
+    }
+
     return {
       api,
       pattern: 'data-sync',
-      code: `// ${api.toUpperCase()} Data Sync Example`,
+      code: `# ${api.toUpperCase()} Data Sync Implementation (Python)
+import asyncio
+import logging
+from typing import List, Dict, Any
+from .${api}_client import ${api.charAt(0).toUpperCase() + api.slice(1)}Client
+
+class ${api.charAt(0).toUpperCase() + api.slice(1)}DataSync:
+    def __init__(self, client_id: str, client_secret: str):
+        self.client = ${api.charAt(0).toUpperCase() + api.slice(1)}Client(client_id, client_secret)
+        self.sync_interval = 300  # 5 minutes
+        self.logger = logging.getLogger(__name__)
+
+    async def sync_data(self, local_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            # Transform local data to ${api.toUpperCase()} format
+            transformed_data = self.transform_to_timeback_format(local_data)
+            
+            # Send data to TimeBack
+            response = await self.client.make_request('/sync', method='POST', json=transformed_data)
+            
+            self.logger.info(f"Data sync successful: {response}")
+            return response
+        except Exception as error:
+            self.logger.error(f"Data sync failed: {error}")
+            raise
+
+    def transform_to_timeback_format(self, data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Implement transformation logic based on ${api.toUpperCase()} schema
+        return [
+            {
+                "id": item.get("id"),
+                # Add transformation logic here
+            }
+            for item in data
+        ]
+
+    async def start_auto_sync(self):
+        while True:
+            try:
+                local_data = await self.get_local_data()
+                await self.sync_data(local_data)
+            except Exception as e:
+                self.logger.error(f"Auto sync error: {e}")
+            
+            await asyncio.sleep(self.sync_interval)`,
     };
   }
 
   private getEventTrackingTemplate(language: string, framework: string, api: string): any {
+    if (language === 'javascript' || language === 'typescript') {
+      return {
+        api,
+        pattern: 'event-tracking',
+        code: `// ${api.toUpperCase()} Event Tracking Implementation
+const { ${api.charAt(0).toUpperCase() + api.slice(1)}Client } = require('./${api}-client');
+
+class ${api.charAt(0).toUpperCase() + api.slice(1)}EventTracker {
+  constructor(clientId, clientSecret) {
+    this.client = new ${api.charAt(0).toUpperCase() + api.slice(1)}Client(clientId, clientSecret);
+    this.eventQueue = [];
+    this.batchSize = 10;
+    this.flushInterval = 30000; // 30 seconds
+    
+    this.startBatchProcessor();
+  }
+
+  async trackEvent(eventType, eventData) {
+    const event = {
+      type: eventType,
+      timestamp: new Date().toISOString(),
+      data: eventData,
+      sessionId: this.getSessionId(),
+    };
+
+    this.eventQueue.push(event);
+    
+    if (this.eventQueue.length >= this.batchSize) {
+      await this.flushEvents();
+    }
+  }
+
+  async flushEvents() {
+    if (this.eventQueue.length === 0) return;
+
+    const events = this.eventQueue.splice(0, this.batchSize);
+    
+    try {
+      await this.client.makeRequest('/events', {
+        method: 'POST',
+        data: { events },
+      });
+      
+      console.log(\`Successfully tracked \${events.length} events\`);
+    } catch (error) {
+      console.error('Event tracking failed:', error);
+      this.eventQueue.unshift(...events);
+    }
+  }
+
+  startBatchProcessor() {
+    setInterval(() => {
+      this.flushEvents();
+    }, this.flushInterval);
+  }
+
+  getSessionId() {
+    return 'session-' + Date.now();
+  }
+}
+
+module.exports = ${api.charAt(0).toUpperCase() + api.slice(1)}EventTracker;`,
+      };
+    }
+
     return {
       api,
       pattern: 'event-tracking',
-      code: `// ${api.toUpperCase()} Event Tracking Example`,
+      code: `# ${api.toUpperCase()} Event Tracking Implementation (Python)
+import asyncio
+import logging
+from datetime import datetime
+from typing import List, Dict, Any
+from .${api}_client import ${api.charAt(0).toUpperCase() + api.slice(1)}Client
+
+class ${api.charAt(0).toUpperCase() + api.slice(1)}EventTracker:
+    def __init__(self, client_id: str, client_secret: str):
+        self.client = ${api.charAt(0).toUpperCase() + api.slice(1)}Client(client_id, client_secret)
+        self.event_queue: List[Dict[str, Any]] = []
+        self.batch_size = 10
+        self.flush_interval = 30  # 30 seconds
+        self.logger = logging.getLogger(__name__)
+        
+        asyncio.create_task(self.start_batch_processor())
+
+    async def track_event(self, event_type: str, event_data: Dict[str, Any]):
+        event = {
+            "type": event_type,
+            "timestamp": datetime.utcnow().isoformat(),
+            "data": event_data,
+            "session_id": self.get_session_id(),
+        }
+
+        self.event_queue.append(event)
+        
+        if len(self.event_queue) >= self.batch_size:
+            await self.flush_events()
+
+    async def flush_events(self):
+        if not self.event_queue:
+            return
+
+        events = self.event_queue[:self.batch_size]
+        self.event_queue = self.event_queue[self.batch_size:]
+        
+        try:
+            await self.client.make_request('/events', method='POST', json={"events": events})
+            self.logger.info(f"Successfully tracked {len(events)} events")
+        except Exception as error:
+            self.logger.error(f"Event tracking failed: {error}")
+            # Re-queue events for retry
+            self.event_queue = events + self.event_queue
+
+    async def start_batch_processor(self):
+        while True:
+            await asyncio.sleep(self.flush_interval)
+            await self.flush_events()
+
+    def get_session_id(self) -> str:
+        # Implement session ID logic
+        return f"session-{int(datetime.utcnow().timestamp())}"`
     };
   }
 
@@ -1121,6 +1703,357 @@ class ${api.charAt(0).toUpperCase() + api.slice(1)}Client:
       return `Begin planning ${opportunities.shortTerm[0].api.toUpperCase()} integration - ${opportunities.shortTerm[0].opportunity}`;
     }
     return 'Focus on adding educational features to enable TimeBack integration opportunities';
+  }
+
+  private async crawlTimeBackDocumentation(args: any): Promise<any> {
+    try {
+      const validatedArgs = CrawlTimeBackDocumentationSchema.parse(args);
+      logger.info('Starting TimeBack documentation crawling', validatedArgs);
+
+      const timebackUrls = [
+        'https://qti.alpha-1edtech.com/docs/',
+        'https://qti.alpha-1edtech.com/openapi.yaml',
+        'https://api.alpha-1edtech.com/scalar/',
+        'https://api.alpha-1edtech.com/openapi.yaml',
+        'https://caliper.alpha-1edtech.com/',
+        'https://caliper.alpha-1edtech.com/openapi.yaml',
+        'https://api.alpha-1edtech.com/scalar?api=powerpath-api',
+        'https://api.alpha-1edtech.com/powerpath/openapi.yaml',
+        'https://api.alpha-1edtech.com/scalar?api=case-api',
+        'https://api.alpha-1edtech.com/case/openapi.yaml',
+        'https://docs.google.com/document/d/16cIsRjdXXcxOKUXQNzpQ0P86RJk1u9h_AcwXS8IvXIY/edit',
+        'https://www.loom.com/share/b123456789abcdef'
+      ];
+
+      const crawledContent = [];
+      for (const url of timebackUrls) {
+        if (validatedArgs.specificApis && validatedArgs.specificApis.length > 0) {
+          const shouldSkip = !validatedArgs.specificApis.some(api => 
+            url.toLowerCase().includes(api.toLowerCase())
+          );
+          if (shouldSkip) continue;
+        }
+
+        try {
+          logger.info(`Crawling URL: ${url}`);
+          const content = await this.documentationCrawler.crawlUrl(url);
+          if (content) {
+            crawledContent.push(content);
+          }
+        } catch (error) {
+          logger.warn(`Failed to crawl ${url}:`, error);
+        }
+      }
+
+      await this.documentationIndexer.indexCrawledContent(crawledContent);
+
+      const stats = await this.documentationIndexer.getIndexStats();
+      
+      return {
+        success: true,
+        message: `Successfully crawled and indexed TimeBack documentation`,
+        stats: {
+          totalDocuments: stats.totalDocuments,
+          totalEndpoints: stats.totalEndpoints,
+          totalSchemas: stats.totalSchemas,
+          totalCodeExamples: stats.totalCodeExamples,
+          crawledUrls: crawledContent.length,
+          apis: stats.apiBreakdown
+        }
+      };
+    } catch (error) {
+      logger.error('Documentation crawling failed:', error);
+      if (error instanceof z.ZodError) {
+        throw new ValidationError('Invalid crawl parameters', error.errors);
+      }
+      throw new IntegrationError(`Documentation crawling failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async searchComprehensiveDocs(args: any): Promise<any> {
+    try {
+      const validatedArgs = SearchComprehensiveDocsSchema.parse(args);
+      logger.info('Searching comprehensive documentation', validatedArgs);
+
+      const searchResults = await this.documentationIndexer.searchDocumentation(
+        validatedArgs.query,
+        {
+          apis: validatedArgs.apis,
+          types: validatedArgs.types,
+          limit: validatedArgs.limit
+        }
+      );
+
+      return {
+        success: true,
+        query: validatedArgs.query,
+        totalResults: searchResults.length,
+        results: searchResults.map(result => {
+          const item = result.item;
+          let title = '';
+          let api = '';
+          let url = '';
+          let summary = '';
+          
+          if (result.type === 'endpoint') {
+            const endpoint = item as any;
+            title = `${endpoint.method?.toUpperCase()} ${endpoint.path}`;
+            api = endpoint.api || '';
+            url = endpoint.url || '';
+            summary = endpoint.summary || endpoint.description || '';
+          } else if (result.type === 'schema') {
+            const schema = item as any;
+            title = schema.name || schema.title || 'Schema';
+            api = schema.api || '';
+            url = schema.url || '';
+            summary = schema.description || '';
+          } else if (result.type === 'code_example') {
+            const example = item as any;
+            title = `${example.language} Example`;
+            api = example.api || '';
+            url = '';
+            summary = example.description || '';
+          } else if (result.type === 'concept') {
+            const concept = item as any;
+            title = concept.name || 'Concept';
+            api = concept.apis?.join(', ') || '';
+            url = '';
+            summary = concept.description || '';
+          }
+          
+          return {
+            title,
+            api,
+            type: result.type,
+            url,
+            relevanceScore: result.relevanceScore,
+            summary,
+            matchedFields: result.matchedFields,
+            context: result.context || ''
+          };
+        })
+      };
+    } catch (error) {
+      logger.error('Comprehensive documentation search failed:', error);
+      if (error instanceof z.ZodError) {
+        throw new ValidationError('Invalid search parameters', error.errors);
+      }
+      throw new IntegrationError(`Documentation search failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async getApiExamples(args: any): Promise<any> {
+    try {
+      const validatedArgs = GetApiExamplesSchema.parse(args);
+      logger.info('Getting API examples', validatedArgs);
+
+      const searchQuery = [
+        validatedArgs.api,
+        validatedArgs.language,
+        validatedArgs.endpoint,
+        validatedArgs.useCase,
+        'example',
+        'code'
+      ].filter(Boolean).join(' ');
+
+      const searchResults = await this.documentationIndexer.searchDocumentation(
+        searchQuery,
+        {
+          types: ['code_example'],
+          apis: validatedArgs.api ? [validatedArgs.api] : undefined,
+          limit: 20
+        }
+      );
+
+      const examples = searchResults
+        .filter(result => result.type === 'code_example')
+        .map(result => result.item as any)
+        .filter(example => {
+          if (validatedArgs.language && !example.language.toLowerCase().includes(validatedArgs.language.toLowerCase())) {
+            return false;
+          }
+          if (validatedArgs.endpoint && example.description && !example.description.toLowerCase().includes(validatedArgs.endpoint.toLowerCase())) {
+            return false;
+          }
+          return true;
+        })
+        .slice(0, 10);
+
+      return {
+        success: true,
+        filters: validatedArgs,
+        totalExamples: examples.length,
+        examples: examples.map(example => ({
+          language: example.language,
+          code: example.code,
+          description: example.description,
+          api: example.api,
+          endpoint: example.endpoint
+        }))
+      };
+    } catch (error) {
+      logger.error('Getting API examples failed:', error);
+      if (error instanceof z.ZodError) {
+        throw new ValidationError('Invalid example parameters', error.errors);
+      }
+      throw new IntegrationError(`Getting API examples failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async compareApiImplementations(args: any): Promise<any> {
+    try {
+      const validatedArgs = CompareApiImplementationsSchema.parse(args);
+      logger.info('Comparing API implementations', validatedArgs);
+
+      const sourceResults = await this.documentationIndexer.searchDocumentation(
+        `${validatedArgs.sourceApi} ${validatedArgs.functionality}`,
+        {
+          apis: [validatedArgs.sourceApi],
+          limit: 10
+        }
+      );
+
+      const targetResults = await this.documentationIndexer.searchDocumentation(
+        `${validatedArgs.targetApi} ${validatedArgs.functionality}`,
+        {
+          apis: [validatedArgs.targetApi],
+          limit: 10
+        }
+      );
+
+      const comparison = {
+        functionality: validatedArgs.functionality,
+        sourceApi: {
+          name: validatedArgs.sourceApi,
+          implementations: sourceResults.map(result => {
+            const item = result.item as any;
+            return {
+              title: result.type === 'endpoint' ? `${item.method?.toUpperCase()} ${item.path}` : 
+                     result.type === 'schema' ? item.name || 'Schema' : 
+                     result.type === 'code_example' ? `${item.language} Example` : 
+                     item.name || 'Item',
+              summary: item.summary || item.description || '',
+              type: result.type
+            };
+          })
+        },
+        targetApi: {
+          name: validatedArgs.targetApi,
+          implementations: targetResults.map(result => {
+            const item = result.item as any;
+            return {
+              title: result.type === 'endpoint' ? `${item.method?.toUpperCase()} ${item.path}` : 
+                     result.type === 'schema' ? item.name || 'Schema' : 
+                     result.type === 'code_example' ? `${item.language} Example` : 
+                     item.name || 'Item',
+              summary: item.summary || item.description || '',
+              type: result.type
+            };
+          })
+        },
+        similarities: [] as string[],
+        differences: [] as string[],
+        recommendations: [] as string[]
+      };
+
+      const sourceEndpoints = sourceResults
+        .filter(r => r.type === 'endpoint')
+        .map(r => r.item as any);
+      const targetEndpoints = targetResults
+        .filter(r => r.type === 'endpoint')
+        .map(r => r.item as any);
+      
+      comparison.similarities = sourceEndpoints
+        .filter(se => targetEndpoints.some(te => 
+          te.method === se.method && (te.path?.includes(validatedArgs.functionality) || se.path?.includes(validatedArgs.functionality))
+        ))
+        .map(ep => `Both APIs support ${ep.method} operations for ${validatedArgs.functionality}`);
+
+      comparison.recommendations = [
+        `Consider using ${validatedArgs.sourceApi} for ${validatedArgs.functionality} if you need ${sourceResults.length > targetResults.length ? 'more comprehensive' : 'simpler'} functionality`,
+        `${validatedArgs.targetApi} might be better if you prefer ${targetResults.length > sourceResults.length ? 'more detailed' : 'streamlined'} implementation`
+      ];
+
+      return {
+        success: true,
+        comparison
+      };
+    } catch (error) {
+      logger.error('API implementation comparison failed:', error);
+      if (error instanceof z.ZodError) {
+        throw new ValidationError('Invalid comparison parameters', error.errors);
+      }
+      throw new IntegrationError(`API comparison failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  private async getIntegrationPatterns(args: any): Promise<any> {
+    try {
+      const validatedArgs = GetIntegrationPatternsSchema.parse(args);
+      logger.info('Getting integration patterns', validatedArgs);
+
+      const searchQuery = [
+        'integration',
+        'pattern',
+        'workflow',
+        validatedArgs.useCase,
+        validatedArgs.difficulty
+      ].filter(Boolean).join(' ');
+
+      const searchResults = await this.documentationIndexer.searchDocumentation(
+        searchQuery,
+        {
+          apis: validatedArgs.apis,
+          limit: 15
+        }
+      );
+
+      const patterns = this.documentationIndexer.getIntegrationPatterns();
+
+      const filteredPatterns = patterns.filter((pattern: any) => {
+        if (validatedArgs.difficulty && pattern.difficulty !== validatedArgs.difficulty) {
+          return false;
+        }
+        if (validatedArgs.useCase && !pattern.description.toLowerCase().includes(validatedArgs.useCase.toLowerCase())) {
+          return false;
+        }
+        return true;
+      });
+
+      return {
+        success: true,
+        filters: validatedArgs,
+        totalPatterns: filteredPatterns.length,
+        patterns: filteredPatterns.map((pattern: any) => ({
+          name: pattern.name,
+          description: pattern.description,
+          difficulty: pattern.difficulty,
+          apis: pattern.apis,
+          steps: pattern.steps,
+          codeExamples: pattern.codeExamples?.slice(0, 2),
+          prerequisites: pattern.prerequisites,
+          estimatedTime: pattern.estimatedTime
+        })),
+        relatedDocumentation: searchResults.slice(0, 5).map(result => {
+          const item = result.item as any;
+          return {
+            title: result.type === 'endpoint' ? `${item.method?.toUpperCase()} ${item.path}` : 
+                   result.type === 'schema' ? item.name || 'Schema' : 
+                   result.type === 'code_example' ? `${item.language} Example` : 
+                   item.name || 'Item',
+            api: item.api || (result.type === 'concept' ? item.apis?.join(', ') : ''),
+            type: result.type,
+            summary: item.summary || item.description || ''
+          };
+        })
+      };
+    } catch (error) {
+      logger.error('Getting integration patterns failed:', error);
+      if (error instanceof z.ZodError) {
+        throw new ValidationError('Invalid pattern parameters', error.errors);
+      }
+      throw new IntegrationError(`Getting integration patterns failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   async run(): Promise<void> {

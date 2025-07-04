@@ -7,24 +7,44 @@
     "build": "tsc",
     "start": "node build/index.js",
     "dev": "ts-node --esm src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "crawler:init": "node build/scripts/init-crawler.js",
+    "crawler:run": "node build/scripts/run-crawler.js",
+    "crawler:status": "node build/scripts/crawler-status.js",
+    "crawler:clear": "node build/scripts/clear-crawler.js"
   },
-  "keywords": ["mcp", "timeback", "1edtech", "education", "api"],
+  "keywords": [
+    "mcp",
+    "timeback",
+    "1edtech",
+    "education",
+    "api"
+  ],
   "author": "Danny Gauntlet AI",
   "license": "ISC",
   "description": "MCP server for TimeBack 1EdTech platform integration and data model synchronization",
   "dependencies": {
     "@apidevtools/swagger-parser": "^12.0.0",
     "@modelcontextprotocol/sdk": "^1.15.0",
+    "@types/cheerio": "^0.22.35",
     "axios": "^1.10.0",
+    "cheerio": "^1.1.0",
     "dotenv": "^17.0.1",
     "js-yaml": "^4.1.0",
+    "node-html-parser": "^7.0.1",
+    "puppeteer": "^24.11.2",
     "winston": "^3.17.0",
     "zod": "^3.25.72"
   },
   "devDependencies": {
+    "@jest/globals": "^30.0.4",
+    "@types/jest": "^30.0.0",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.10",
+    "jest": "^30.0.4",
+    "ts-jest": "^29.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }

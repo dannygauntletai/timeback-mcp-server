@@ -21,9 +21,13 @@ The TimeBack MCP Server provides a unified interface for working with all five T
 - **Integration Mapping** - Generate templates for API integrations
 - **Comprehensive Search** - Search across all API documentation and schemas
 - **Intelligent Codebase Analysis** - Analyze your existing codebase and get tailored TimeBack integration recommendations
+- **Advanced Documentation Crawler** - Automatically crawl, index, and search TimeBack documentation from multiple sources
+- **Multi-Format Documentation Support** - Handle Swagger/OpenAPI, Scalar docs, Google Docs, and video content
+- **Intelligent Content Extraction** - Extract code examples, API patterns, and integration guides from documentation
 
 ### 🔧 MCP Tools
 
+#### Core API Tools
 1. **`load-timeback-specs`** - Load all TimeBack OpenAPI specifications
 2. **`analyze-api-endpoints`** - Analyze endpoints with filtering by API, tag, or method
 3. **`search-api-documentation`** - Search across all API documentation
@@ -31,7 +35,16 @@ The TimeBack MCP Server provides a unified interface for working with all five T
 5. **`generate-integration-mapping`** - Create integration templates
 6. **`validate-api-integration`** - Validate integration configurations
 7. **`generate-api-documentation`** - Generate comprehensive API docs
+
+#### Intelligent Analysis Tools
 8. **`analyze-codebase-integration`** - Analyze your codebase and recommend TimeBack integrations
+
+#### Documentation Crawler Tools
+9. **`crawl-timeback-documentation`** - Crawl and index comprehensive TimeBack documentation from multiple sources
+10. **`search-comprehensive-docs`** - Search across all crawled documentation with advanced filtering
+11. **`get-api-examples`** - Extract and retrieve code examples from documentation
+12. **`compare-api-implementations`** - Compare API implementations across different documentation formats
+13. **`get-integration-patterns`** - Get integration patterns and best practices from crawled content
 
 ### 📚 MCP Resources
 
@@ -61,7 +74,13 @@ npm run build
 4. Configure environment variables:
 ```bash
 cp .env.example .env
-# Edit .env with your TimeBack API credentials
+# Edit .env with your TimeBack API credentials and crawler settings
+```
+
+5. Initialize documentation crawler (optional):
+```bash
+npm run crawler:init
+# Downloads and indexes initial documentation
 ```
 
 ## Configuration
@@ -85,6 +104,19 @@ CLIENT_SECRET=your_client_secret
 MCP_SERVER_NAME=timeback-mcp-server
 MCP_SERVER_VERSION=1.0.0
 LOG_LEVEL=info
+
+# Documentation Crawler Configuration
+CRAWLER_MAX_RETRIES=3
+CRAWLER_RETRY_DELAY=2000
+CRAWLER_TIMEOUT=30000
+CRAWLER_RATE_LIMIT=1000
+CRAWLER_RESPECT_ROBOTS_TXT=true
+CRAWLER_SCHEDULE_ENABLED=true
+CRAWLER_SCHEDULE_INTERVAL=24h
+CRAWLER_INCREMENTAL_UPDATES=true
+CRAWLER_EXTRACT_CODE_EXAMPLES=true
+CRAWLER_BUILD_RELATIONSHIPS=true
+CRAWLER_INDEX_METADATA=true
 ```
 
 ## Usage
@@ -99,6 +131,22 @@ npm start
 
 ```bash
 npm run dev
+```
+
+### Crawler Management
+
+```bash
+# Initialize crawler and download documentation
+npm run crawler:init
+
+# Run crawler manually
+npm run crawler:run
+
+# Check crawler status
+npm run crawler:status
+
+# Clear crawler cache
+npm run crawler:clear
 ```
 
 ### Using with Claude Desktop
@@ -179,6 +227,118 @@ Output: Comprehensive analysis including:
 
 This tool performs almost like a deep research call on your codebase combined with the MCP server's knowledge of TimeBack APIs, providing intelligent recommendations based on your actual application structure and needs.
 
+## Documentation Crawler Architecture
+
+The TimeBack MCP Server includes a sophisticated documentation crawler that automatically indexes comprehensive documentation from multiple TimeBack API sources.
+
+### 🕷️ Crawler Capabilities
+
+#### Supported Documentation Formats
+- **Swagger/OpenAPI Documentation** - Interactive API documentation with live examples
+- **Scalar Documentation** - Modern API documentation with enhanced UX
+- **Google Docs** - Rich text documentation with embedded content
+- **Video Content** - Loom videos and other educational content (metadata extraction)
+- **Static HTML** - Traditional documentation websites
+
+#### Crawled Documentation Sources
+- **QTI API**: https://qti.alpha-1edtech.com/docs/, OpenAPI specs, Google Docs guides
+- **OneRoster API**: https://api.alpha-1edtech.com/scalar/, OpenAPI specifications
+- **Caliper API**: https://caliper.alpha-1edtech.com/, comprehensive analytics documentation
+- **PowerPath API**: https://api.alpha-1edtech.com/scalar?api=powerpath-api, mastery learning docs
+- **CASE API**: https://api.alpha-1edtech.com/scalar?api=case-api, standards documentation
+- **OpenBadge & CLR**: Video walkthroughs and implementation guides
+
+### 🔍 Advanced Documentation Tools
+
+#### Crawl TimeBack Documentation
+```
+Use crawl-timeback-documentation to index all available documentation:
+- Automatically discovers and crawls all TimeBack API documentation
+- Extracts code examples, integration patterns, and best practices
+- Builds searchable index with relationships between concepts
+- Supports incremental updates and scheduling
+```
+
+#### Search Comprehensive Documentation
+```
+Use search-comprehensive-docs for intelligent documentation search:
+- Query: "student enrollment workflow"
+- Search across: all APIs, code examples, integration guides
+- Filter by: API type, content format, difficulty level
+- Get: relevant snippets with source links and context
+```
+
+#### Extract API Examples
+```
+Use get-api-examples to find implementation examples:
+- API: "oneroster" 
+- Functionality: "create student"
+- Returns: code examples, request/response samples, integration patterns
+```
+
+#### Compare API Implementations
+```
+Use compare-api-implementations to understand differences:
+- Source API: "oneroster" (user management)
+- Target API: "caliper" (person entities)
+- Functionality: "user representation"
+- Returns: detailed comparison with mapping suggestions
+```
+
+#### Get Integration Patterns
+```
+Use get-integration-patterns for best practices:
+- APIs: ["oneroster", "caliper"]
+- Use Case: "student analytics pipeline"
+- Difficulty: "intermediate"
+- Returns: step-by-step integration patterns with code examples
+```
+
+### ⚙️ Crawler Configuration
+
+The crawler supports extensive configuration options:
+
+```env
+# Crawler Settings
+CRAWLER_MAX_RETRIES=3
+CRAWLER_RETRY_DELAY=2000
+CRAWLER_TIMEOUT=30000
+CRAWLER_RATE_LIMIT=1000
+CRAWLER_RESPECT_ROBOTS_TXT=true
+
+# Scheduling
+CRAWLER_SCHEDULE_ENABLED=true
+CRAWLER_SCHEDULE_INTERVAL=24h
+CRAWLER_INCREMENTAL_UPDATES=true
+
+# Content Processing
+CRAWLER_EXTRACT_CODE_EXAMPLES=true
+CRAWLER_BUILD_RELATIONSHIPS=true
+CRAWLER_INDEX_METADATA=true
+```
+
+### 🏗️ Crawler Architecture
+
+#### Components
+- **DocumentationCrawler** - Core crawling engine with multi-format support
+- **DocumentationIndexer** - Advanced indexing with full-text search and relationships
+- **DocumentationStore** - Persistent storage with versioning and caching
+- **CrawlerScheduler** - Automated scheduling and incremental updates
+
+#### Processing Pipeline
+1. **Discovery** - Identify documentation sources and formats
+2. **Crawling** - Extract content using format-specific parsers
+3. **Processing** - Clean, structure, and enhance content
+4. **Indexing** - Build searchable index with relationships
+5. **Storage** - Persist with versioning and metadata
+6. **Serving** - Provide fast search and retrieval through MCP tools
+
+#### Content Enhancement
+- **Code Example Extraction** - Automatically identify and extract code snippets
+- **Relationship Building** - Connect related concepts across different APIs
+- **Pattern Recognition** - Identify common integration patterns and best practices
+- **Metadata Enrichment** - Add tags, categories, and difficulty levels
+
 ## API Integration Examples
 
 ### Student Data Synchronization
@@ -203,9 +363,14 @@ This tool performs almost like a deep research call on your codebase combined wi
 src/
 ├── config/           # Configuration management
 ├── server/           # Main MCP server implementation
-├── services/         # API services (OpenAPI parser, auth)
-├── tools/            # MCP tool implementations
-├── resources/        # MCP resource handlers
+├── services/         # Core services
+│   ├── auth.ts                    # OAuth2 authentication
+│   ├── openapi-parser.ts          # OpenAPI specification parsing
+│   ├── codebase-analyzer.ts       # Intelligent codebase analysis
+│   ├── documentation-crawler.ts   # Multi-format documentation crawler
+│   ├── documentation-indexer.ts   # Advanced search and indexing
+│   ├── documentation-store.ts     # Persistent storage with versioning
+│   └── crawler-scheduler.ts       # Automated crawling and updates
 ├── utils/            # Utilities (logging, errors)
 └── types/            # TypeScript type definitions
 ```

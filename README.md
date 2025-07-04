@@ -721,4 +721,4 @@ For issues with this MCP server, please open a GitHub issue.
 
 ---
 
-**Built by Danny Gauntlet AI for the TimeBack 1EdTech Platform**
+**Built for the TimeBack 1EdTech Platform**
